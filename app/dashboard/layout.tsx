@@ -17,20 +17,22 @@ export default function DashboardLayout({
     router.push("/");
   };
 
-  // Daftar Menu Update
+  // Daftar Menu Lengkap
   const menus = [
     { name: "Dashboard", href: "/dashboard", icon: "🏠" },
-    { name: "Jadwal Kelas", href: "/dashboard/bookings", icon: "📅" }, // <-- Menu Baru
+    { name: "Jadwal Kelas", href: "/dashboard/bookings", icon: "📅" },
     { name: "Murid", href: "/dashboard/students", icon: "👨‍🎓" },
     { name: "Instruktur", href: "/dashboard/instructors", icon: "👩‍🏫" },
+    { name: "Master Paket", href: "/dashboard/packages", icon: "📦" }, // Baru
+    { name: "Bank Materi", href: "/dashboard/materials", icon: "📚" }, // Baru
     { name: "Lokasi", href: "/dashboard/locations", icon: "📍" },
   ];
 
   return (
     <div className="flex min-h-screen bg-gray-100">
       {/* --- SIDEBAR KIRI (Tetap) --- */}
-      <aside className="fixed left-0 top-0 h-screen w-64 bg-white shadow-lg border-r border-gray-200 z-10">
-        <div className="flex h-16 items-center justify-center border-b border-gray-100">
+      <aside className="fixed left-0 top-0 h-screen w-64 bg-white shadow-lg border-r border-gray-200 z-10 overflow-y-auto">
+        <div className="flex h-16 items-center justify-center border-b border-gray-100 bg-white sticky top-0 z-20">
           <h2 className="text-xl font-bold text-blue-600 tracking-wider">ADMIN PANEL</h2>
         </div>
         
@@ -55,7 +57,7 @@ export default function DashboardLayout({
         </nav>
 
         {/* Tombol Logout di Bawah */}
-        <div className="absolute bottom-0 w-full p-4 border-t border-gray-100">
+        <div className="p-4 border-t border-gray-100 mt-auto">
           <button
             onClick={handleLogout}
             className="flex w-full items-center gap-3 rounded-md px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 transition"
