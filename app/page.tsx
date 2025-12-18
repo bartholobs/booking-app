@@ -172,15 +172,8 @@ export default function AuthPage() {
         {view === "verify" && (
           <form onSubmit={handleVerify} className="space-y-5">
             <div className="bg-blue-50 p-4 rounded-lg text-sm text-blue-800 border border-blue-200">
-              Kode OTP 6 digit telah dikirim ke <strong>{email}</strong>. Silakan cek Inbox atau Spam folder Anda.
+              Link Verifikasi sudah dikirim ke <strong>{email}</strong>. Silakan cek Inbox atau Spam folder Anda.
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Masukkan Kode OTP</label>
-              <input type="text" value={otp} onChange={e => setOtp(e.target.value)} placeholder="123456" className="w-full rounded-lg border border-gray-300 p-3 text-center text-2xl tracking-widest font-mono outline-none focus:ring-2 focus:ring-blue-500" required />
-            </div>
-            <button disabled={loading} className="w-full rounded-lg bg-purple-600 py-3 font-bold text-white hover:bg-purple-700 transition disabled:bg-gray-400">
-              {loading ? "Memverifikasi..." : "KONFIRMASI OTP"}
-            </button>
             <div className="text-center text-sm text-gray-600">
               Salah email? <button type="button" onClick={() => setView("signup")} className="text-red-600 hover:underline">Kembali</button>
             </div>
