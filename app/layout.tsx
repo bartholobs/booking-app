@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import "./globals.css"; // <--- INI WAJIB ADA! Jangan sampai hilang.
+import { Nunito } from "next/font/google"; // Import Nunito
+import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+// Konfigurasi Nunito
+const nunito = Nunito({ 
+  subsets: ["latin"],
+  variable: "--font-nunito", // Kita bikin variable CSS-nya
+});
 
 export const metadata: Metadata = {
   title: "Sistem Booking Kelas",
@@ -16,7 +20,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      {/* Pasang variable-nya di sini agar Tailwind bisa baca */}
+      <body className={`${nunito.variable} font-sans antialiased`}>
+        {children}
+      </body>
     </html>
   );
 }
