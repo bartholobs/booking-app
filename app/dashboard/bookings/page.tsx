@@ -1,23 +1,55 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
-import Link from "next/link";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation"; 
 import { supabase } from "../../../lib/supabaseClient";
+import { 
+  CalendarPlus, 
+  Search, 
+  Clock, 
+  MapPin, 
+  RefreshCcw, 
+  Info,
+  Trash2,
+  Menu,
+  X,
+  UserPlus,
+  Check
+} from "lucide-react";
 
+// --- KONFIGURASI JAM (08:00 - 21:00) ---
 const HOURS = Array.from({ length: 14 }, (_, i) => {
   const h = i + 8;
   return `${h.toString().padStart(2, "0")}:00`;
 });
 
-export default function BookingsTimelinePage() {
+export default function BookingsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [bookings, setBookings] = useState<any[]>([]);
   
-  // State untuk Data Master Kurikulum (Kamus Materi yang sudah dimekarkan)
-  const [curriculumMap, setCurriculumMap] = useState<Record<number, any[]>>({});
+  // --- STATE LAYOUT ---
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  // Fix Timezone: Gunakan waktu lokal saat inisialisasi bulan
+  // --- STATE MASTER DATA ---
+  const [allStudents, setAllStudents] = useState<any[]>([]);
+  const [instructors, setInstructors] = useState<any[]>([]);
+  const [locations, setLocations] = useState<any[]>([]);
+  
+  // --- STATE FORM SIDEBAR (MULTI STUDENT) ---
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [time, setTime] = useState("");
+  const [instructorId, setInstructorId] = useState("");
+  const [locationId, setLocationId] = useState("");
+  
+  // Multi Student Selection
+  const [selectedStudents, setSelectedStudents] = useState<any[]>([]); // Array object murid
+  const [studentSearch, setStudentSearch] = useState("");
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  
+  const [saving, setSaving] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // --- STATE TIMELINE FILTER ---
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     const y = now.getFullYear();
@@ -25,75 +57,28 @@ export default function BookingsTimelinePage() {
     return `${y}-${m}`;
   });
 
-  // 1. Load & Expand Data Kurikulum
-  useEffect(() => {
-    const fetchCurriculum = async () => {
-      // Ambil session_count juga!
-      const { data } = await supabase
-        .from("curriculum")
-        .select(`
-          package_id, 
-          sort_order, 
-          material:materials (name, code, session_count)
-        `)
-        .order("sort_order", { ascending: true });
-
-      if (data) {
-        // Kelompokkan dulu per Paket
-        const rawGroup: Record<number, any[]> = {};
-        data.forEach((item: any) => {
-          if (!rawGroup[item.package_id]) rawGroup[item.package_id] = [];
-          rawGroup[item.package_id].push(item);
-        });
-
-        // PROSES EXPAND (MEKARKAN SESI)
-        // Jika Photoshop 6 sesi, kita bikin arraynya jadi [Ps1, Ps2, Ps3, Ps4, Ps5, Ps6]
-        const expandedMap: Record<number, any[]> = {};
-        
-        Object.keys(rawGroup).forEach((pkgId: any) => {
-            const items = rawGroup[pkgId];
-            const sessionList: any[] = [];
-
-            // Loop setiap Materi di paket ini
-            items.forEach((currItem) => {
-                const mat = currItem.material;
-                const totalSesi = mat.session_count || 1; // Default 1 kalau null
-
-                // Duplikat materi sebanyak jumlah sesinya
-                for (let i = 1; i <= totalSesi; i++) {
-                    sessionList.push({
-                        name: mat.name,
-                        code: mat.code,
-                        currentSession: i,      // Ini sesi ke berapa (1, 2, ... 6)
-                        totalSessions: totalSesi // Dari total berapa (6)
-                    });
-                }
-            });
-            expandedMap[pkgId] = sessionList;
-        });
-
-        setCurriculumMap(expandedMap);
-      }
-    };
-    fetchCurriculum();
-  }, []);
-
-  // 2. Ambil Data Jadwal
-  const fetchBookings = async () => {
+  // 1. FETCH DATA (Master & Bookings)
+  const fetchAllData = async () => {
     setLoading(true);
-    const [year, month] = selectedMonth.split("-");
     
-    // Fix Timezone: Construct string manual YYYY-MM-DD
-    const startDate = `${year}-${month}-01`;
-    
-    // Hitung tanggal terakhir bulan dengan aman (Local Time)
-    const lastDayObj = new Date(parseInt(year), parseInt(month), 0);
-    const lastY = lastDayObj.getFullYear();
-    const lastM = String(lastDayObj.getMonth() + 1).padStart(2, '0');
-    const lastD = String(lastDayObj.getDate()).padStart(2, '0');
-    const endDate = `${lastY}-${lastM}-${lastD}`;
+    // A. Master Data (Cuma sekali idealnya, tapi disini digabung biar aman)
+    const [resStudent, resInstructor, resLocation] = await Promise.all([
+      supabase.from("students").select("id, name, package_id").eq("status", "active").order("name"),
+      supabase.from("instructors").select("id, nickname, name").order("name"),
+      supabase.from("locations").select("id, name, duration").order("name"),
+    ]);
 
-    const { data, error } = await supabase
+    if (resStudent.data) setAllStudents(resStudent.data);
+    if (resInstructor.data) setInstructors(resInstructor.data);
+    if (resLocation.data) setLocations(resLocation.data);
+
+    // B. Booking Data (Sesuai Bulan)
+    const [year, month] = selectedMonth.split("-");
+    const startDate = `${year}-${month}-01`;
+    const lastDayObj = new Date(parseInt(year), parseInt(month), 0);
+    const endDate = `${year}-${month}-${String(lastDayObj.getDate()).padStart(2, '0')}`;
+
+    const { data: bookingData, error } = await supabase
       .from("bookings")
       .select(`
         id, date, time, status, topic, student_id,
@@ -106,72 +91,77 @@ export default function BookingsTimelinePage() {
       .order("date", { ascending: true })
       .order("time", { ascending: true });
 
-    if (error) {
-      alert("Gagal ambil data: " + error.message);
-    } else {
-      setBookings(data || []);
-    }
+    if (!error) setBookings(bookingData || []);
     setLoading(false);
   };
 
   useEffect(() => {
-    fetchBookings();
+    fetchAllData();
+    // Click outside handler for dropdown
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setIsDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [selectedMonth]);
 
-  // 3. LOGIKA PINTAR V2: Mencocokkan dengan Expand Map
-  const enrichedBookings = useMemo(() => {
-    // A. Kelompokkan booking per murid untuk tau urutan history
-    const studentHistory: Record<number, any[]> = {};
+  // --- LOGIKA FORM ---
+  const handleSelectStudent = (student: any) => {
+    // Cek duplikat
+    if (!selectedStudents.find(s => s.id === student.id)) {
+      setSelectedStudents([...selectedStudents, student]);
+    }
+    setStudentSearch(""); 
+    setIsDropdownOpen(false);
+  };
+
+  const removeSelectedStudent = (id: number) => {
+    setSelectedStudents(selectedStudents.filter(s => s.id !== id));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!date || !time || selectedStudents.length === 0 || !instructorId || !locationId) {
+      return alert("Mohon lengkapi data: Tanggal, Jam, Minimal 1 Murid, Guru, dan Lokasi.");
+    }
     
-    // B. Sortir semua booking (harus urut waktu biar history bener)
-    const sortedAll = [...bookings].sort((a, b) => 
-      new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime()
-    );
+    setSaving(true);
 
-    sortedAll.forEach(b => {
-      if (!studentHistory[b.student_id]) studentHistory[b.student_id] = [];
-      studentHistory[b.student_id].push(b);
-    });
+    // Siapkan array insert (Satu murid = Satu baris booking)
+    const inserts = selectedStudents.map(s => ({
+      date, 
+      time: time.length === 5 ? time + ":00" : time,
+      student_id: s.id,
+      instructor_id: parseInt(instructorId),
+      location_id: parseInt(locationId),
+      status: "scheduled",
+      topic: "" // Topik dikosongkan sesuai request
+    }));
 
-    // C. Mapping Data
-    return bookings.map(booking => {
-      const history = studentHistory[booking.student_id] || [];
-      
-      // Cari ini booking urutan ke berapa (Index 0 = Pertemuan Pertama)
-      const bookingSequenceIndex = history.findIndex(h => h.id === booking.id);
-      
-      // Ambil Paket Murid
-      const packageId = booking.student?.package_id;
-      
-      // Ambil Daftar Materi yang SUDAH DIMEKARKAN
-      const expandedSessions = curriculumMap[packageId] || [];
-      
-      // Ambil data sesi yang cocok dengan urutan booking
-      const sessionData = expandedSessions[bookingSequenceIndex]; 
+    const { error } = await supabase.from("bookings").insert(inserts);
 
-      let displayMaterial = booking.topic || "-";
-      let displaySession = `Ke-${bookingSequenceIndex + 1}`; // Default fallback
+    if (!error) {
+      alert("Berhasil menyimpan jadwal!");
+      setSelectedStudents([]); 
+      // Keep date/time/instructor for faster input next class
+      fetchAllData();
+    } else {
+      alert("Error: " + error.message);
+    }
+    setSaving(false);
+  };
 
-      if (sessionData) {
-        // Kalau ketemu di kurikulum, pake data kurikulum
-        displayMaterial = sessionData.name;
-        // Format: "Sesi 1/6"
-        displaySession = `Sesi ${sessionData.currentSession} / ${sessionData.totalSessions}`;
-      } else if (bookingSequenceIndex >= expandedSessions.length && expandedSessions.length > 0) {
-        // Kalau bookingnya melebihi kurikulum (misal paket cuma 16 sesi, tapi ini booking ke-17)
-        displayMaterial = "Materi Tambahan / Selesai";
-        displaySession = `Extra #${bookingSequenceIndex + 1}`;
-      }
+  const handleDelete = async (id: number) => {
+    if (!confirm("Hapus jadwal ini?")) return;
+    await supabase.from("bookings").delete().eq("id", id);
+    fetchAllData();
+  };
 
-      return {
-        ...booking,
-        computedSession: displaySession, 
-        computedMaterial: displayMaterial
-      };
-    });
-  }, [bookings, curriculumMap]);
+  const handleEdit = (id: number) => {
+    router.push(`/dashboard/bookings/${id}`);
+  };
 
-  // Generate Tanggal & Map Timeline (Logic Lama)
+  // --- LOGIKA TIMELINE DATA ---
   const daysInMonth = useMemo(() => {
     const [year, month] = selectedMonth.split("-");
     const days = [];
@@ -194,180 +184,289 @@ export default function BookingsTimelinePage() {
     return map;
   }, [bookings]);
 
-  const handleDelete = async (id: number) => {
-    if(!confirm("Yakin hapus jadwal ini?")) return;
-    await supabase.from("bookings").delete().eq("id", id);
-    fetchBookings();
-  }
+  // Helper Format Tanggal Timeline: SEN 29 DES
+  const formatTimelineDate = (dateObj: Date) => {
+    const days = ['MIN', 'SEN', 'SEL', 'RAB', 'KAM', 'JUM', 'SAB'];
+    const months = ['JAN', 'PEB', 'MAR', 'APR', 'MEI', 'JUN', 'JUL', 'AGU', 'SEP', 'OKT', 'NOP', 'DES'];
+    
+    const dayName = days[dateObj.getDay()];
+    const dateNum = dateObj.getDate();
+    const monthName = months[dateObj.getMonth()];
 
-  const handleEdit = (id: number) => {
-    router.push(`/dashboard/bookings/${id}`);
-  }
+    return { dayName, dateNum, monthName };
+  };
 
   return (
-    <div className="flex flex-col gap-8 w-[calc(100vw-22rem)] pb-10">
+    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-gray-100">
       
-      {/* TIMELINE MATRIX */}
-      <div className="flex flex-col h-[calc(100vh-6rem)] bg-white overflow-hidden rounded-lg shadow-sm border border-gray-200 shrink-0">
-        <div className="flex-none p-4 bg-white border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-xl font-bold text-gray-800">Timeline Jadwal</h1>
-              <p className="text-xs text-gray-500">Monitoring visual per bulan</p>
-            </div>
-            <div className="flex gap-3">
-              <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-blue-500 bg-white shadow-sm" />
-              <Link href="/dashboard/bookings/create" className="rounded-md bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-blue-700 transition flex items-center gap-2"><span>+</span> Jadwal Baru</Link>
-            </div>
+      {/* === SIDEBAR (FORM INPUT) === */}
+      {/* Tampilan Sidebar bisa di-hide (w-0) atau show (w-80) */}
+      <aside 
+        className={`
+          flex-shrink-0 bg-white border-r border-gray-200 shadow-xl z-30 transition-all duration-300 ease-in-out flex flex-col
+          ${isSidebarOpen ? 'w-80 translate-x-0' : 'w-0 -translate-x-full opacity-0 pointer-events-none'}
+        `}
+      >
+        <div className="p-5 border-b border-gray-100 bg-blue-600 text-white flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <CalendarPlus size={20} />
+            <h2 className="font-bold text-lg">Buat Jadwal</h2>
           </div>
+          <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-blue-700 p-1 rounded">
+            <X size={18} />
+          </button>
         </div>
 
-        <div className="flex-1 overflow-auto relative bg-white">
-          <div className="inline-block min-w-full">
-            <table className="border-separate border-spacing-0 w-full">
-              <thead>
-                <tr>
-                  <th className="sticky top-0 left-0 z-30 bg-gray-100 min-w-[80px] p-2 text-center text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-r border-gray-300 shadow-[2px_2px_0_#9ca3af]">Tgl</th>
-                  {HOURS.map((h) => (
-                    <th key={h} className="sticky top-0 z-20 bg-gray-50 border-b border-r border-gray-200 min-w-[140px] p-2 text-center text-sm font-semibold text-gray-700 shadow-[0_2px_0_#9ca3af]">{h}</th>
+        <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            
+            {/* 1. Tanggal & Jam */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Tanggal</label>
+                <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm focus:border-blue-500 outline-none" required />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Jam</label>
+                <select value={time} onChange={e => setTime(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm focus:border-blue-500 outline-none bg-white" required>
+                  <option value="">-Pilih-</option>
+                  {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* 2. Multi Student Select */}
+            <div className="relative" ref={dropdownRef}>
+              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Murid (Bisa Banyak)</label>
+              
+              {/* Chips Murid Terpilih */}
+              <div className="flex flex-wrap gap-2 mb-2">
+                {selectedStudents.map(s => (
+                  <span key={s.id} className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded text-xs flex items-center gap-1">
+                    {s.name}
+                    <button type="button" onClick={() => removeSelectedStudent(s.id)} className="hover:text-red-500"><X size={12} /></button>
+                  </span>
+                ))}
+              </div>
+
+              {/* Input Search */}
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-2.5 text-gray-400" />
+                <input 
+                  type="text" value={studentSearch} placeholder="Cari & tambah murid..."
+                  onChange={(e) => { setStudentSearch(e.target.value); setIsDropdownOpen(true); }}
+                  onFocus={() => setIsDropdownOpen(true)}
+                  className="w-full border border-gray-300 rounded pl-9 pr-3 py-2 text-sm focus:border-blue-500 outline-none"
+                />
+              </div>
+              
+              {/* Dropdown List */}
+              {isDropdownOpen && (
+                <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded border border-gray-200 bg-white shadow-lg">
+                  {allStudents.filter(s => s.name.toLowerCase().includes(studentSearch.toLowerCase())).map((s) => (
+                    <div 
+                      key={s.id} onClick={() => handleSelectStudent(s)} 
+                      className="cursor-pointer px-4 py-2 hover:bg-blue-50 text-sm text-gray-700 border-b border-gray-50 flex justify-between items-center"
+                    >
+                      <span>{s.name}</span>
+                      {selectedStudents.find(sel => sel.id === s.id) && <Check size={12} className="text-green-500"/>}
+                    </div>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={15} className="p-10 text-center text-gray-400">Sedang memuat matrix...</td></tr>
-                ) : daysInMonth.map((dayObj) => {
-                  
-                  // Fix Timezone
-                  const y = dayObj.getFullYear();
-                  const m = String(dayObj.getMonth() + 1).padStart(2, '0');
-                  const d = String(dayObj.getDate()).padStart(2, '0');
-                  const dateStr = `${y}-${m}-${d}`; 
+                </div>
+              )}
+            </div>
 
-                  const dayName = dayObj.toLocaleDateString("id-ID", { weekday: "short" });
-                  const isWeekend = dayObj.getDay() === 0 || dayObj.getDay() === 6;
-                  
-                  return (
-                    <tr key={dateStr} className={isWeekend ? "bg-orange-50" : "bg-white hover:bg-gray-50"}>
-                      <td className={`sticky left-0 z-10 border-b border-r border-gray-300 p-2 text-center min-w-[80px] shadow-[2px_0_0_#9ca3af] ${isWeekend ? "bg-orange-50 text-red-600" : "bg-white text-gray-800"}`}>
-                        <div className="font-bold text-lg leading-none">{dayObj.getDate()}</div>
-                        <div className="text-[10px] uppercase font-semibold mt-1">{dayName}</div>
-                      </td>
-                      {HOURS.map((h) => {
-                        const key = `${dateStr}_${h}`;
-                        const classList = bookingsMap[key];
-                        return (
-                          <td key={key} className="border-r border-b border-gray-200 p-1 h-[90px] relative align-top transition-colors hover:bg-blue-50/30">
-                            {!classList && <div className="w-full h-full flex items-center justify-center cursor-pointer group"><span className="text-gray-200 group-hover:text-blue-400 text-lg opacity-0 group-hover:opacity-100 transition-opacity">+</span></div>}
-                            {classList && classList.map((item: any) => (
-                              <div key={item.id} className="mb-1 p-1.5 rounded border border-blue-200 bg-blue-50 hover:bg-blue-100 shadow-sm cursor-pointer group relative overflow-hidden transition-all hover:scale-[1.02] z-0 hover:z-10">
-                                <div className={`absolute left-0 top-0 bottom-0 w-1 ${item.status === 'done' ? 'bg-green-500' : 'bg-blue-500'}`}></div>
-                                <div className="pl-2">
-                                  <div className="font-bold text-xs text-gray-900 truncate" title={item.student?.name}>{item.student?.name}</div>
-                                  <div className="text-[10px] text-gray-600 flex flex-wrap gap-1 mt-0.5">
-                                    <span className="font-medium text-blue-700">{item.instructor?.nickname}</span>
-                                    <span className="bg-white px-1 rounded border text-gray-400 text-[9px]">{item.location?.name}</span>
-                                  </div>
-                                </div>
-                                <div className="absolute top-0.5 right-0.5 hidden group-hover:flex gap-1">
-                                  <button onClick={(e) => { e.stopPropagation(); handleEdit(item.id); }} className="flex items-center justify-center bg-white border border-gray-300 text-blue-600 rounded-full w-5 h-5 text-[10px] hover:bg-blue-600 hover:text-white transition-colors shadow-sm" title="Edit">✎</button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }} className="flex items-center justify-center bg-white border border-gray-300 text-red-500 rounded-full w-5 h-5 text-[10px] hover:bg-red-500 hover:text-white transition-colors shadow-sm" title="Hapus">✕</button>
-                                </div>
-                              </div>
-                            ))}
-                          </td>
-                        );
-                      })}
+            {/* 3. Instruktur & Lokasi */}
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Instruktur</label>
+                <select value={instructorId} onChange={e => setInstructorId(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm focus:border-blue-500 outline-none bg-white" required>
+                  <option value="">-- Pilih Guru --</option>
+                  {instructors.map(i => <option key={i.id} value={i.id}>{i.nickname}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Lokasi</label>
+                <select value={locationId} onChange={e => setLocationId(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm focus:border-blue-500 outline-none bg-white" required>
+                  <option value="">-- Pilih Ruang --</option>
+                  {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <button type="submit" disabled={saving} className="w-full bg-blue-600 text-white rounded py-3 font-bold text-sm hover:bg-blue-700 transition disabled:bg-gray-400">
+              {saving ? "MENYIMPAN..." : "SIMPAN JADWAL"}
+            </button>
+          </form>
+        </div>
+      </aside>
+
+      {/* === CONTENT AREA (TIMELINE & TABLE) === */}
+      <main className="flex-1 flex flex-col min-w-0 transition-all duration-300">
+        
+        {/* HEADER BAR */}
+        <div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 shrink-0 shadow-sm z-20">
+          <div className="flex items-center gap-4">
+            {/* Tombol Burger untuk Show/Hide Sidebar */}
+            {!isSidebarOpen && (
+              <button onClick={() => setIsSidebarOpen(true)} className="p-2 hover:bg-gray-100 rounded text-gray-600">
+                <Menu size={20} />
+              </button>
+            )}
+            
+            <h1 className="text-lg font-bold text-gray-800 hidden sm:block">TIMELINE</h1>
+            
+            {/* Filter Bulan */}
+            <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded px-2 py-1">
+              <span className="text-xs font-bold text-gray-400 uppercase">Bulan:</span>
+              <input 
+                type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} 
+                className="bg-transparent text-sm font-bold text-blue-700 focus:outline-none" 
+              />
+            </div>
+          </div>
+
+          <button onClick={fetchAllData} className="flex items-center gap-2 text-gray-500 hover:text-blue-600 text-sm font-medium">
+            <RefreshCcw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+          </button>
+        </div>
+
+        {/* SCROLL AREA UTAMA */}
+        <div className="flex-1 overflow-auto bg-gray-100 p-4 custom-scrollbar">
+          <div className="flex flex-col gap-6">
+            
+            {/* 1. TIMELINE MATRIX */}
+            <div className="bg-white rounded border border-gray-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="border-separate border-spacing-0 w-full min-w-max">
+                  {/* Header Jam (Sticky Top) */}
+                  <thead className="sticky top-0 z-10">
+                    <tr>
+                      <th className="bg-gray-50 border-b border-r border-gray-200 w-20 p-2 text-center text-xs font-bold text-gray-400 sticky left-0 z-20 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                        TGL
+                      </th>
+                      {HOURS.map(h => (
+                        <th key={h} className="bg-white border-b border-r border-gray-100 w-32 p-2 text-center text-xs font-bold text-gray-600">
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  
+                  {/* Body Timeline */}
+                  <tbody>
+                    {daysInMonth.map((dayObj) => {
+                      const { dayName, dateNum, monthName } = formatTimelineDate(dayObj);
+                      
+                      // Format key YYYY-MM-DD
+                      const y = dayObj.getFullYear();
+                      const m = String(dayObj.getMonth() + 1).padStart(2, '0');
+                      const d = String(dayObj.getDate()).padStart(2, '0');
+                      const dateStr = `${y}-${m}-${d}`;
+                      
+                      const isSunday = dayObj.getDay() === 0;
+
+                      return (
+                        <tr key={dateStr} className={`group ${isSunday ? 'bg-red-50/30' : 'bg-white hover:bg-gray-50'}`}>
+                          {/* Kolom Tanggal (Sticky Left) */}
+                          <td className={`sticky left-0 z-10 border-b border-r border-gray-200 p-2 text-center w-20 shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${isSunday ? 'bg-red-50 text-red-600' : 'bg-white text-gray-700'}`}>
+                            <div className="flex flex-col items-center leading-tight">
+                              <span className="text-[9px] font-bold opacity-60">{dayName}</span>
+                              <span className="text-xl font-bold">{dateNum}</span>
+                              <span className="text-[8px] font-bold opacity-60">{monthName}</span>
+                            </div>
+                          </td>
+
+                          {/* Kolom Jam */}
+                          {HOURS.map(h => {
+                            const key = `${dateStr}_${h}`;
+                            const cellBookings = bookingsMap[key];
+                            return (
+                              <td 
+                                key={key} 
+                                className="border-b border-r border-gray-100 p-1 h-20 align-top relative transition-colors cursor-pointer hover:bg-blue-50/20"
+                                onClick={() => { setDate(dateStr); setTime(h); if(!isSidebarOpen) setIsSidebarOpen(true); }} // Klik sel -> Set form
+                              >
+                                {cellBookings && cellBookings.map((b: any) => (
+                                  <div key={b.id} className="mb-1 p-1.5 rounded border border-l-4 text-[10px] shadow-sm bg-white border-gray-200 border-l-blue-500 hover:shadow-md transition-all group/card relative">
+                                    <div className="font-bold text-gray-800 truncate">{b.student?.name}</div>
+                                    <div className="flex justify-between text-gray-500 mt-0.5">
+                                      <span>{b.instructor?.nickname}</span>
+                                      <span>{b.location?.name}</span>
+                                    </div>
+                                    {/* Actions Hover */}
+                                    <div className="absolute top-0 right-0 bottom-0 left-0 bg-white/90 hidden group-hover/card:flex items-center justify-center gap-2">
+                                        <button onClick={(e) => { e.stopPropagation(); handleEdit(b.id); }} className="text-blue-600 font-bold hover:underline">Edit</button>
+                                        <button onClick={(e) => { e.stopPropagation(); handleDelete(b.id); }} className="text-red-600 font-bold hover:underline">Del</button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* 2. TABEL BOOKING DETAIL (BAWAH) */}
+            <div className="bg-white rounded border border-gray-200 shadow-sm">
+              <div className="p-4 border-b border-gray-200 font-bold text-gray-700 text-sm uppercase tracking-wide">
+                Detail List Jadwal
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-bold text-gray-500">Waktu</th>
+                      <th className="px-4 py-3 text-left font-bold text-gray-500">Murid</th>
+                      <th className="px-4 py-3 text-left font-bold text-gray-500">Paket</th>
+                      <th className="px-4 py-3 text-left font-bold text-gray-500">Instruktur</th>
+                      <th className="px-4 py-3 text-left font-bold text-gray-500">Lokasi</th>
+                      <th className="px-4 py-3 text-left font-bold text-gray-500">Status</th>
+                      <th className="px-4 py-3 text-right font-bold text-gray-500">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {bookings.map((item) => (
+                      <tr key={item.id} className="hover:bg-gray-50 transition">
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <div className="font-bold text-gray-800">{item.date}</div>
+                          <div className="text-xs text-gray-500">{item.time?.slice(0,5)}</div>
+                        </td>
+                        <td className="px-4 py-2 font-medium text-blue-700">{item.student?.name}</td>
+                        <td className="px-4 py-2 text-xs text-gray-600">{item.student?.package?.name || "-"}</td>
+                        <td className="px-4 py-2 text-gray-600">{item.instructor?.nickname}</td>
+                        <td className="px-4 py-2 text-gray-600">{item.location?.name}</td>
+                        <td className="px-4 py-2">
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${item.status === 'done' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:text-red-700 text-xs font-bold px-2 py-1 border border-red-200 rounded">Hapus</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
         </div>
-      </div>
+      </main>
 
-      {/* DETAIL LIST BOOKING */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden shrink-0">
-        <div className="p-4 border-b border-gray-200 bg-gray-50">
-          <h2 className="text-lg font-bold text-gray-800">Detail List Booking</h2>
-          <p className="text-xs text-gray-500">Daftar lengkap jadwal bulan ini</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="px-6 py-3 text-left font-bold text-gray-600 uppercase tracking-wider">Tanggal & Waktu</th>
-                <th className="px-6 py-3 text-left font-bold text-gray-600 uppercase tracking-wider">Murid</th>
-                <th className="px-6 py-3 text-left font-bold text-gray-600 uppercase tracking-wider">Paket</th>
-                <th className="px-6 py-3 text-left font-bold text-gray-600 uppercase tracking-wider">Materi (Otomatis)</th>
-                <th className="px-6 py-3 text-center font-bold text-gray-600 uppercase tracking-wider">Sesi Ke</th>
-                <th className="px-6 py-3 text-left font-bold text-gray-600 uppercase tracking-wider">Instruktur</th>
-                <th className="px-6 py-3 text-left font-bold text-gray-600 uppercase tracking-wider">Lokasi</th>
-                <th className="px-6 py-3 text-left font-bold text-gray-600 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-right font-bold text-gray-600 uppercase tracking-wider">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {enrichedBookings.length === 0 ? (
-                <tr><td colSpan={9} className="px-6 py-8 text-center text-gray-400 italic">Belum ada data di bulan ini.</td></tr>
-              ) : (
-                enrichedBookings.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50 transition">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="font-bold text-gray-900">{item.date}</div>
-                      <div className="text-gray-500 text-xs">{item.time?.slice(0,5)}</div>
-                    </td>
-                    <td className="px-6 py-4 font-medium text-gray-900">
-                      {item.student?.name || <span className="text-red-400 italic">Terhapus</span>}
-                    </td>
-                    
-                    {/* KOLOM PAKET */}
-                    <td className="px-6 py-4 text-xs">
-                      {item.student?.package?.name ? (
-                        <span className="bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100 font-semibold">
-                          {item.student.package.name}
-                        </span>
-                      ) : <span className="text-gray-400">-</span>}
-                    </td>
-
-                    {/* KOLOM MATERI (LOGIC BARU) */}
-                    <td className="px-6 py-4 text-xs font-medium text-blue-700 max-w-[200px] truncate" title={item.computedMaterial}>
-                      {item.computedMaterial}
-                    </td>
-
-                    {/* KOLOM SESI (LOGIC BARU) */}
-                    <td className="px-6 py-4 text-center">
-                      <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-bold border border-blue-100 whitespace-nowrap">
-                        {item.computedSession}
-                      </span>
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-600">{item.instructor?.nickname}</td>
-                    <td className="px-6 py-4">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 border border-gray-300">
-                        {item.location?.name}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                        item.status === 'done' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                      }`}>
-                        {item.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right flex justify-end gap-2">
-                      <button onClick={() => handleEdit(item.id)} className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs font-medium transition">Edit</button>
-                      <button onClick={() => handleDelete(item.id)} className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-3 py-1 rounded-md text-xs font-medium transition">Hapus</button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
+      {/* Styles */}
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { bg: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      `}</style>
     </div>
   );
 }
