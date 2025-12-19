@@ -27,7 +27,6 @@ export default function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
-  // Mengambil data user yang sedang login dari Supabase
   useEffect(() => {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -36,7 +35,6 @@ export default function Navbar() {
     getUser();
   }, []);
 
-  // Fungsi Logout
   const handleLogout = async () => {
     const confirmLogout = window.confirm("Apakah Anda yakin ingin keluar?");
     if (confirmLogout) {
@@ -45,14 +43,12 @@ export default function Navbar() {
     }
   };
 
-  // Navigasi Utama
   const navLinks = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Jadwal Kelas", href: "/dashboard/bookings", icon: CalendarDays },
     { name: "Murid", href: "/dashboard/students", icon: Users },
   ];
 
-  // Navigasi Master Data (Dropdown)
   const masterDataLinks = [
     { name: "Instruktur", href: "/dashboard/instructors", icon: UserSquare2 },
     { name: "Master Paket", href: "/dashboard/packages", icon: Package },
@@ -65,7 +61,8 @@ export default function Navbar() {
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-md border-b border-gray-200 shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      {/* UPDATE: Hapus max-w-7xl dan mx-auto, ganti jadi w-full px-6 */}
+      <div className="w-full px-6">
         <div className="flex justify-between h-16">
           
           {/* Logo & Brand */}
@@ -93,7 +90,7 @@ export default function Navbar() {
                 href={link.href}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-300 ${
                   isActive(link.href)
-                    ? "bg-blue-600 text-white shadow-md shadow-blue-100 scale-105"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-100"
                     : "text-gray-500 hover:bg-gray-100 hover:text-blue-600"
                 }`}
               >
@@ -118,7 +115,6 @@ export default function Navbar() {
                 <ChevronDown size={14} className={`transition-transform duration-300 ${isMasterOpen ? 'rotate-180' : ''}`} />
               </button>
 
-              {/* Dropdown Menu Panel */}
               {isMasterOpen && (
                 <div 
                   className="absolute top-full right-0 w-60 mt-2 py-3 bg-white rounded-2xl shadow-2xl border border-gray-100 animate-in fade-in slide-in-from-top-2 duration-200"
@@ -147,14 +143,13 @@ export default function Navbar() {
               )}
             </div>
 
-            {/* Separator */}
             <div className="h-8 w-[1px] bg-gray-200 mx-4"></div>
 
             {/* User Info & Logout */}
             <div className="flex items-center gap-4">
               <div className="hidden lg:flex items-center gap-3 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-100">
                 <UserCircle size={20} className="text-gray-400" />
-                <span className="text-xs text-gray-600 font-bold max-w-[120px] truncate">{userEmail}</span>
+                <span className="text-xs text-gray-600 font-bold max-w-[150px] truncate">{userEmail}</span>
               </div>
               <button
                 onClick={handleLogout}
